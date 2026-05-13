@@ -1,0 +1,4 @@
+Frontend guidelines
+
+* Prioriza la legibilidad y claridad del codigo. La velocidad y eficiencia son prioridades secundarias a menos que se especifique
+* Utiliza componentes separados para mejor estructura del proyecto, por ejemplo: App.tsx necesita: Modal no escribas el modal dentro de App.tsx crea un component nuevo NuevoModal.tsx
