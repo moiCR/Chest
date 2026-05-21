@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
 import { JWTPayload, jwtVerify, SignJWT } from "jose";
 import { prisma } from "../lib/prisma.js";
 import argon2 from "argon2";
@@ -48,6 +48,36 @@ async function generateToken(user: {
     .setExpirationTime(process.env.JWT_EXPIRES_IN || "7d")
     .sign(getJwtSecret());
 }
+
+type AuthenticatedRequest = Request & {
+  authUser?: AuthTokenPayload;
+};
+
+const authenticate = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const authorization = req.headers.authorization;
+    const token = authorization?.startsWith("Bearer ")
+      ? authorization.slice("Bearer ".length)
+      : null;
+
+    if (!token) {
+      return res.status(401).json({
+        message: "Authentication is required",
+      });
+    }
+
+    req.authUser = await verifyToken(token);
+    return next();
+  } catch {
+    return res.status(401).json({
+      message: "The session is invalid or expired",
+    });
+  }
+};
 
 router.post("/register", async (req, res) => {
   try {
@@ -167,6 +197,110 @@ router.post("/login", async (req, res) => {
       },
     });
   } catch (err) {
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
+  }
+});
+
+router.patch("/profile", authenticate, async (req: AuthenticatedRequest, res) => {
+  try {
+    const authUser = req.authUser;
+
+    if (!authUser) {
+      return res.status(401).json({
+        message: "Authentication is required",
+      });
+    }
+
+    const { username, email, password } = req.body as {
+      username?: string;
+      email?: string;
+      password?: string;
+    };
+
+    const nextUsername = username?.trim();
+    const nextEmail = email?.trim().toLowerCase();
+    const nextPassword = password?.trim();
+
+    if (!nextUsername && !nextEmail && !nextPassword) {
+      return res.status(400).json({
+        message: "At least one field is required",
+      });
+    }
+
+    if (nextPassword && nextPassword.length < 8) {
+      return res.status(400).json({
+        message: "The password must be at least 8 characters long",
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: {
+        id: authUser.id,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "This user does not exist",
+      });
+    }
+
+    if (!user.active) {
+      return res.status(403).json({
+        message: "This account is currently disabled",
+      });
+    }
+
+    if (nextUsername || nextEmail) {
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          id: {
+            not: user.id,
+          },
+          OR: [
+            ...(nextUsername ? [{ username: nextUsername }] : []),
+            ...(nextEmail ? [{ email: nextEmail }] : []),
+          ],
+        },
+      });
+
+      if (existingUser) {
+        return res.status(400).json({
+          message: "The email address or username is already in use",
+        });
+      }
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        ...(nextUsername ? { username: nextUsername } : {}),
+        ...(nextEmail ? { email: nextEmail } : {}),
+        ...(nextPassword ? { password: await argon2.hash(nextPassword) } : {}),
+      },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        role: true,
+        active: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    const token = await generateToken(updatedUser);
+
+    return res.json({
+      message: "Profile updated",
+      token,
+      user: updatedUser,
+    });
+  } catch {
     return res.status(500).json({
       message: "Internal Server Error",
     });

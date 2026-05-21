@@ -1,14 +1,16 @@
 "use client";
 
-/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/immutability, react-hooks/set-state-in-effect */
+/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/set-state-in-effect */
 
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useAnimationControls } from "motion/react";
@@ -18,12 +20,85 @@ import type { CSSProperties, ReactNode } from "react";
 const cn = (...classes: Array<string | false | null | undefined>) =>
   classes.filter(Boolean).join(" ");
 
+const modalStackListeners = new Set<() => void>();
+let modalStack: string[] = [];
+
+const notifyModalStackListeners = () => {
+  modalStackListeners.forEach((listener) => listener());
+};
+
+const subscribeToModalStack = (listener: () => void) => {
+  modalStackListeners.add(listener);
+  return () => modalStackListeners.delete(listener);
+};
+
+const getModalStackSnapshot = () => modalStack.join("|");
+
+const registerModal = (id: string) => {
+  if (!modalStack.includes(id)) {
+    modalStack = [...modalStack, id];
+    notifyModalStackListeners();
+  }
+};
+
+const unregisterModal = (id: string) => {
+  if (!modalStack.includes(id)) return;
+
+  modalStack = modalStack.filter((modalId) => modalId !== id);
+  notifyModalStackListeners();
+};
+
+let bodyScrollLockCount = 0;
+let previousBodyOverflow = "";
+let previousBodyPaddingRight = "";
+let previousScrollbarCompensation = "";
+
+const lockBodyScroll = () => {
+  if (bodyScrollLockCount === 0) {
+    const scrollbarWidth =
+      window.innerWidth - document.documentElement.clientWidth;
+
+    previousBodyOverflow = document.body.style.overflow;
+    previousBodyPaddingRight = document.body.style.paddingRight;
+    previousScrollbarCompensation =
+      document.documentElement.style.getPropertyValue(
+        "--scrollbar-compensation",
+      );
+
+    document.body.style.overflow = "hidden";
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+      document.documentElement.style.setProperty(
+        "--scrollbar-compensation",
+        `${scrollbarWidth}px`,
+      );
+    }
+  }
+
+  bodyScrollLockCount += 1;
+};
+
+const unlockBodyScroll = () => {
+  bodyScrollLockCount = Math.max(0, bodyScrollLockCount - 1);
+
+  if (bodyScrollLockCount !== 0) return;
+
+  document.body.style.overflow = previousBodyOverflow;
+  document.body.style.paddingRight = previousBodyPaddingRight;
+  document.documentElement.style.setProperty(
+    "--scrollbar-compensation",
+    previousScrollbarCompensation,
+  );
+};
+
 export interface ModalProps extends Omit<HTMLMotionProps<"div">, "layoutId"> {
   isOpen: boolean;
   onClose: () => void;
   children?: ReactNode;
   layoutId?: string;
   anchorEl?: HTMLElement | null;
+  anchorPlacement?: "center" | "right-end";
+  isSecondaryModal?: boolean;
   originEl?: HTMLElement | null;
   sharedElementIds?: string[];
   disableOriginAnimation?: boolean;
@@ -45,26 +120,39 @@ export function Modal({
   children,
   layoutId: _layoutId,
   anchorEl,
+  anchorPlacement = "center",
+  isSecondaryModal = false,
   originEl,
   sharedElementIds: _sharedElementIds,
   disableOriginAnimation = false,
   className,
   ...modalAttrs
 }: ModalProps) {
+  const modalId = useId();
   const modalRef = useRef<HTMLDivElement | null>(null);
   const controls = useAnimationControls();
+  const stackSnapshot = useSyncExternalStore(
+    subscribeToModalStack,
+    getModalStackSnapshot,
+    getModalStackSnapshot,
+  );
   const [isMounted, setIsMounted] = useState(false);
   const [shouldRender, setShouldRender] = useState(isOpen);
   const [panelVisible, setPanelVisible] = useState(false);
   const [positionStyle, setPositionStyle] =
     useState<CSSProperties>(centeredStyle);
 
-  const prevOverflow = useRef("");
-  const prevPaddingRight = useRef("");
-  const prevScrollbarCompensation = useRef("");
   const restoreOriginRef = useRef<(() => void) | null>(null);
   const isAnchored = !!anchorEl;
   const animationEl = originEl ?? anchorEl ?? null;
+  const stack = stackSnapshot ? stackSnapshot.split("|") : [];
+  const stackIndex = Math.max(0, stack.indexOf(modalId));
+  const isTopModal = stack[stack.length - 1] === modalId;
+  const canInteractWithPanel = stack.length === 0 || isTopModal;
+  const panelZIndex = 50 + Math.max(stackIndex, isSecondaryModal ? 1 : 0) * 10;
+  const backdropZIndex = panelZIndex - 5;
+  const shouldRenderBackdrop =
+    isOpen && (isTopModal || (shouldRender && stack.length === 0));
 
   useEffect(() => {
     setIsMounted(true);
@@ -73,7 +161,7 @@ export function Modal({
   const backdropClass = useMemo(
     () =>
       cn(
-        "fixed inset-0 z-40 backdrop-blur-xs",
+        "fixed inset-0 backdrop-blur-xs",
         isAnchored ? "bg-transparent" : "bg-white/5 dark:bg-black/10",
       ),
     [isAnchored],
@@ -106,15 +194,15 @@ export function Modal({
     restoreOriginRef.current?.();
   }, []);
 
-  const updatePosition = useCallback(() => {
+  const computePositionStyle = useCallback(() => {
     const modal = modalRef.current;
-    if (!modal) return;
+    if (!modal) return null;
 
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
     if (vw < 768) {
-      setPositionStyle({
+      return {
         position: "fixed",
         top: 0,
         left: 0,
@@ -124,15 +212,13 @@ export function Modal({
         margin: 0,
         borderRadius: 0,
         overflowY: "auto",
-      });
-      return;
+      } satisfies CSSProperties;
     }
 
     const anchorRect = anchorEl?.getBoundingClientRect();
 
     if (!anchorRect) {
-      setPositionStyle(centeredStyle);
-      return;
+      return centeredStyle;
     }
 
     const pad = 12;
@@ -147,14 +233,17 @@ export function Modal({
     let posX = left + width / 2 - modalW / 2;
     let posY = top;
 
-    if (posY + modalH > vh - bottomPad) {
+    if (anchorPlacement === "right-end") {
+      posX = anchorRect.right + pad;
+      posY = bottom - modalH;
+    } else if (posY + modalH > vh - bottomPad) {
       posY = bottom - modalH;
     }
 
     posX = Math.max(pad, Math.min(posX, vw - modalW - pad));
     posY = Math.max(pad, Math.min(posY, vh - modalH - bottomPad));
 
-    setPositionStyle({
+    return {
       position: "fixed",
       left: posX,
       top: posY,
@@ -162,8 +251,44 @@ export function Modal({
       maxHeight: `calc(100vh - ${pad * 2}px)`,
       borderRadius: 24,
       overflowY: "auto",
-    });
-  }, [anchorEl]);
+    } satisfies CSSProperties;
+  }, [anchorEl, anchorPlacement]);
+
+  const applyPositionStyle = useCallback((style: CSSProperties) => {
+    const modal = modalRef.current;
+    if (!modal) return;
+
+    modal.style.position = String(style.position ?? "");
+    modal.style.inset = String(style.inset ?? "");
+    modal.style.left =
+      typeof style.left === "number" ? `${style.left}px` : String(style.left ?? "");
+    modal.style.top =
+      typeof style.top === "number" ? `${style.top}px` : String(style.top ?? "");
+    modal.style.width =
+      typeof style.width === "number"
+        ? `${style.width}px`
+        : String(style.width ?? "");
+    modal.style.height =
+      typeof style.height === "number"
+        ? `${style.height}px`
+        : String(style.height ?? "");
+    modal.style.maxHeight = String(style.maxHeight ?? "");
+    modal.style.margin =
+      typeof style.margin === "number"
+        ? `${style.margin}px`
+        : String(style.margin ?? "");
+    modal.style.borderRadius =
+      typeof style.borderRadius === "number"
+        ? `${style.borderRadius}px`
+        : String(style.borderRadius ?? "");
+    modal.style.overflowY = String(style.overflowY ?? "");
+  }, []);
+
+  const updatePosition = useCallback(() => {
+    const nextPositionStyle = computePositionStyle();
+    if (!nextPositionStyle) return;
+    setPositionStyle(nextPositionStyle);
+  }, [computePositionStyle]);
 
   const getOriginSnapshot = useCallback(() => {
     if (!animationEl || disableOriginAnimation) return null;
@@ -183,6 +308,13 @@ export function Modal({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!shouldRender) return;
+
+    registerModal(modalId);
+    return () => unregisterModal(modalId);
+  }, [modalId, shouldRender]);
+
   useLayoutEffect(() => {
     if (!shouldRender) return;
     updatePosition();
@@ -196,26 +328,26 @@ export function Modal({
     const frame = window.requestAnimationFrame(async () => {
       if (cancelled) return;
 
+      const measuredPositionStyle = anchorEl ? computePositionStyle() : null;
+      if (measuredPositionStyle) {
+        setPositionStyle(measuredPositionStyle);
+        applyPositionStyle(measuredPositionStyle);
+      }
+
       const finalRect = modal.getBoundingClientRect();
       const finalRadius = window.getComputedStyle(modal).borderRadius;
       const openingOrigin = getOriginSnapshot();
       const isAnchorAnimation = !!anchorEl && !originEl;
-      const transformOrigin =
-        isAnchorAnimation && openingOrigin
-          ? Math.abs(openingOrigin.rect.bottom - finalRect.bottom) <
-            Math.abs(openingOrigin.rect.top - finalRect.top)
-          ? "center bottom"
-          : "center top"
-        : "top left";
+      const transformOrigin = isAnchorAnimation ? "center center" : "top left";
       const originX = isAnchorAnimation
         ? (openingOrigin?.rect.left ?? finalRect.left) +
           (openingOrigin?.rect.width ?? finalRect.width) / 2 -
           (finalRect.left + finalRect.width / 2)
         : (openingOrigin?.rect.left ?? 0) - finalRect.left;
       const originY = isAnchorAnimation
-        ? transformOrigin === "center bottom"
-          ? (openingOrigin?.rect.bottom ?? 0) - finalRect.bottom
-          : (openingOrigin?.rect.top ?? 0) - finalRect.top
+        ? (openingOrigin?.rect.top ?? finalRect.top) +
+          (openingOrigin?.rect.height ?? finalRect.height) / 2 -
+          (finalRect.top + finalRect.height / 2)
         : (openingOrigin?.rect.top ?? 0) - finalRect.top;
 
       if (isOpen) {
@@ -254,21 +386,16 @@ export function Modal({
       const origin = getOriginSnapshot();
       if (origin) {
         const isAnchorAnimation = !!anchorEl && !originEl;
-        const transformOrigin = isAnchorAnimation
-          ? Math.abs(origin.rect.bottom - finalRect.bottom) <
-            Math.abs(origin.rect.top - finalRect.top)
-            ? "center bottom"
-            : "center top"
-          : "top left";
+        const transformOrigin = isAnchorAnimation ? "center center" : "top left";
         const originX = isAnchorAnimation
           ? origin.rect.left +
             origin.rect.width / 2 -
             (finalRect.left + finalRect.width / 2)
           : origin.rect.left - finalRect.left;
         const originY = isAnchorAnimation
-          ? transformOrigin === "center bottom"
-            ? origin.rect.bottom - finalRect.bottom
-            : origin.rect.top - finalRect.top
+          ? origin.rect.top +
+            origin.rect.height / 2 -
+            (finalRect.top + finalRect.height / 2)
           : origin.rect.top - finalRect.top;
 
         hideOrigin();
@@ -304,6 +431,8 @@ export function Modal({
     };
   }, [
     anchorEl,
+    applyPositionStyle,
+    computePositionStyle,
     controls,
     getOriginSnapshot,
     hideOrigin,
@@ -324,54 +453,33 @@ export function Modal({
     if (!isOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && isTopModal) onClose();
     };
 
     window.addEventListener("keydown", handleKeyDown);
-
-    const scrollbarWidth =
-      window.innerWidth - document.documentElement.clientWidth;
-    prevOverflow.current = document.body.style.overflow;
-    prevPaddingRight.current = document.body.style.paddingRight;
-    prevScrollbarCompensation.current =
-      document.documentElement.style.getPropertyValue(
-        "--scrollbar-compensation",
-      );
-
-    document.body.style.overflow = "hidden";
-    if (scrollbarWidth > 0) {
-      document.body.style.paddingRight = `${scrollbarWidth}px`;
-      document.documentElement.style.setProperty(
-        "--scrollbar-compensation",
-        `${scrollbarWidth}px`,
-      );
-    }
+    lockBodyScroll();
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = prevOverflow.current;
-      document.body.style.paddingRight = prevPaddingRight.current;
-      document.documentElement.style.setProperty(
-        "--scrollbar-compensation",
-        prevScrollbarCompensation.current,
-      );
+      unlockBodyScroll();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, isTopModal, onClose]);
 
   if (!isMounted) return null;
 
   return createPortal(
     <>
       <AnimatePresence initial={false}>
-        {isOpen && (
+        {shouldRenderBackdrop && (
           <motion.div
             key="modal-backdrop"
             className={backdropClass}
+            style={{ zIndex: backdropZIndex }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            onClick={onClose}
+            onClick={isTopModal ? onClose : undefined}
           />
         )}
       </AnimatePresence>
@@ -381,6 +489,8 @@ export function Modal({
           ref={modalRef}
           style={{
             ...positionStyle,
+            pointerEvents: canInteractWithPanel ? undefined : "none",
+            zIndex: panelZIndex,
             visibility: panelVisible ? "visible" : "hidden",
           }}
           className={panelClass}

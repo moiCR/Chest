@@ -165,10 +165,28 @@ export default function Home() {
     null,
   );
   const [activeOrigin, setActiveOrigin] = useState<AuthOrigin | null>(null);
+  const [pressedAuthOrigin, setPressedAuthOrigin] = useState<AuthOrigin | null>(
+    null,
+  );
   const [isModalTransitionLocked, setIsModalTransitionLocked] = useState(false);
   const modalLockTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const authOriginRestoreTimeoutRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+
+  const restoreAuthOriginAfterTransition = () => {
+    if (authOriginRestoreTimeoutRef.current) {
+      clearTimeout(authOriginRestoreTimeoutRef.current);
+    }
+
+    authOriginRestoreTimeoutRef.current = setTimeout(() => {
+      setActiveOrigin(null);
+      setPressedAuthOrigin(null);
+      authOriginRestoreTimeoutRef.current = null;
+    }, MODAL_TRANSITION_LOCK_MS);
+  };
 
   const lockModalTransitions = () => {
     setIsModalTransitionLocked(true);
@@ -183,11 +201,60 @@ export default function Home() {
     }, MODAL_TRANSITION_LOCK_MS);
   };
 
+  const canOpenAuthModal =
+    !isModalTransitionLocked && !isLoginOpen && !isRegisterOpen && !selectedFeature;
+
+  const openLoginFromElement = (
+    originEl: HTMLButtonElement,
+    origin: AuthOrigin,
+  ) => {
+    if (
+      isModalTransitionLocked ||
+      isLoginOpen ||
+      isRegisterOpen ||
+      selectedFeature
+    ) {
+      return;
+    }
+
+    setPressedAuthOrigin(origin);
+    lockModalTransitions();
+    setLoginOriginEl(originEl);
+    setActiveOrigin(origin);
+    setIsLoginOpen(true);
+  };
+
+  const openRegisterFromElement = (
+    originEl: HTMLButtonElement,
+    origin: AuthOrigin,
+  ) => {
+    if (
+      isModalTransitionLocked ||
+      isLoginOpen ||
+      isRegisterOpen ||
+      selectedFeature
+    ) {
+      return;
+    }
+
+    setPressedAuthOrigin(origin);
+    lockModalTransitions();
+    setRegisterOriginEl(originEl);
+    setActiveOrigin(origin);
+    setIsRegisterOpen(true);
+  };
+
   useEffect(() => {
     return () => {
       if (modalLockTimeoutRef.current) {
         clearTimeout(modalLockTimeoutRef.current);
       }
+
+      if (authOriginRestoreTimeoutRef.current) {
+        clearTimeout(authOriginRestoreTimeoutRef.current);
+      }
+
+      setPressedAuthOrigin(null);
     };
   }, []);
 
@@ -195,38 +262,22 @@ export default function Home() {
     event: MouseEvent<HTMLButtonElement>,
     origin: AuthOrigin,
   ) => {
-    if (
-      isModalTransitionLocked ||
-      isLoginOpen ||
-      isRegisterOpen ||
-      selectedFeature
-    ) {
+    if (event.detail !== 0) {
       return;
     }
 
-    lockModalTransitions();
-    setLoginOriginEl(event.currentTarget);
-    setActiveOrigin(origin);
-    setIsLoginOpen(true);
+    openLoginFromElement(event.currentTarget, origin);
   };
 
   const openRegister = (
     event: MouseEvent<HTMLButtonElement>,
     origin: AuthOrigin,
   ) => {
-    if (
-      isModalTransitionLocked ||
-      isLoginOpen ||
-      isRegisterOpen ||
-      selectedFeature
-    ) {
+    if (event.detail !== 0) {
       return;
     }
 
-    lockModalTransitions();
-    setRegisterOriginEl(event.currentTarget);
-    setActiveOrigin(origin);
-    setIsRegisterOpen(true);
+    openRegisterFromElement(event.currentTarget, origin);
   };
 
   const closeLogin = () => {
@@ -234,7 +285,7 @@ export default function Home() {
 
     lockModalTransitions();
     setIsLoginOpen(false);
-    setActiveOrigin(null);
+    restoreAuthOriginAfterTransition();
   };
 
   const closeRegister = () => {
@@ -242,7 +293,7 @@ export default function Home() {
 
     lockModalTransitions();
     setIsRegisterOpen(false);
-    setActiveOrigin(null);
+    restoreAuthOriginAfterTransition();
   };
 
   const openFeature = (
@@ -299,15 +350,16 @@ export default function Home() {
                     className="h-11 min-w-[122px] cursor-pointer rounded-full bg-[#e7e7e7] px-6 text-lg font-bold text-black disabled:cursor-default"
                     style={{
                       borderRadius: 9999,
-                      pointerEvents:
-                        isRegisterOpen || isModalTransitionLocked
-                          ? "none"
-                          : undefined,
-                      visibility:
-                        isRegisterOpen && activeOrigin === "hero-register"
-                          ? "hidden"
-                          : undefined,
-                    }}
+	                      pointerEvents:
+	                        isRegisterOpen || isModalTransitionLocked
+	                          ? "none"
+	                          : undefined,
+	                      opacity:
+	                        pressedAuthOrigin === "hero-register" ||
+	                        (isRegisterOpen && activeOrigin === "hero-register")
+	                          ? 0
+	                          : 1,
+	                    }}
                     transition={{ duration: 0.12, ease: "easeOut" }}
                     whileHover={
                       isModalTransitionLocked
@@ -318,9 +370,15 @@ export default function Home() {
                       isModalTransitionLocked
                         ? undefined
                         : { scaleX: 1.03, scaleY: 0.98 }
-                    }
-                    onClick={(event) => openRegister(event, "hero-register")}
-                    type="button"
+	                    }
+	                    onPointerDown={(event) =>
+	                      openRegisterFromElement(event.currentTarget, "hero-register")
+	                    }
+	                    onPointerCancel={() => {
+	                      if (canOpenAuthModal) setPressedAuthOrigin(null);
+	                    }}
+	                    onClick={(event) => openRegister(event, "hero-register")}
+	                    type="button"
                   >
                     Register
                   </motion.button>
@@ -329,15 +387,16 @@ export default function Home() {
                     className="h-11 min-w-[122px] cursor-pointer rounded-full bg-white/8 px-6 text-lg font-bold text-white disabled:cursor-default"
                     style={{
                       borderRadius: 9999,
-                      pointerEvents:
-                        isLoginOpen || isModalTransitionLocked
-                          ? "none"
-                          : undefined,
-                      visibility:
-                        isLoginOpen && activeOrigin === "hero-login"
-                          ? "hidden"
-                          : undefined,
-                    }}
+	                      pointerEvents:
+	                        isLoginOpen || isModalTransitionLocked
+	                          ? "none"
+	                          : undefined,
+	                      opacity:
+	                        pressedAuthOrigin === "hero-login" ||
+	                        (isLoginOpen && activeOrigin === "hero-login")
+	                          ? 0
+	                          : 1,
+	                    }}
                     transition={{ duration: 0.12, ease: "easeOut" }}
                     whileHover={
                       isModalTransitionLocked
@@ -348,9 +407,15 @@ export default function Home() {
                       isModalTransitionLocked
                         ? undefined
                         : { scaleX: 1.03, scaleY: 0.98 }
-                    }
-                    onClick={(event) => openLogin(event, "hero-login")}
-                    type="button"
+	                    }
+	                    onPointerDown={(event) =>
+	                      openLoginFromElement(event.currentTarget, "hero-login")
+	                    }
+	                    onPointerCancel={() => {
+	                      if (canOpenAuthModal) setPressedAuthOrigin(null);
+	                    }}
+	                    onClick={(event) => openLogin(event, "hero-login")}
+	                    type="button"
                   >
                     Log in
                   </motion.button>
@@ -406,15 +471,16 @@ export default function Home() {
                 className="mt-4 h-10 w-[160px] cursor-pointer rounded-full bg-[#e6e6e6] text-base font-extrabold text-black disabled:cursor-default"
                 onClick={(event) => openLogin(event, "buy-now")}
                 style={{
-                    pointerEvents:
-                      isLoginOpen || isModalTransitionLocked
-                        ? "none"
-                        : undefined,
-                    visibility:
-                      isLoginOpen && activeOrigin === "buy-now"
-                        ? "hidden"
-                        : undefined,
-                }}
+	                    pointerEvents:
+	                      isLoginOpen || isModalTransitionLocked
+	                        ? "none"
+	                        : undefined,
+	                    opacity:
+	                      pressedAuthOrigin === "buy-now" ||
+	                      (isLoginOpen && activeOrigin === "buy-now")
+	                        ? 0
+	                        : 1,
+	                }}
                 transition={{ duration: 0.12, ease: "easeOut" }}
                 whileHover={
                   isModalTransitionLocked
@@ -425,8 +491,14 @@ export default function Home() {
                   isModalTransitionLocked
                     ? undefined
                     : { scaleX: 1.03, scaleY: 0.98 }
-                }
-                type="button"
+	                }
+		                onPointerDown={(event) =>
+		                  openLoginFromElement(event.currentTarget, "buy-now")
+		                }
+		                onPointerCancel={() => {
+		                  if (canOpenAuthModal) setPressedAuthOrigin(null);
+		                }}
+	                type="button"
               >
                 Buy now
               </motion.button>
