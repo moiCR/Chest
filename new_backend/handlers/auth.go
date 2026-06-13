@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -49,16 +50,8 @@ func Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var count int
-	err := database.DB.QueryRow(
-		`SELECT COUNT(*) FROM "Users" WHERE "username" = ? OR "email" = ?`,
-		req.Username, req.Email,
-	).Scan(&count)
-	if err != nil {
-		log.Printf("Register error (count): %v", err)
-		jsonError(w, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
+	var count int64
+	database.DB.Model(&models.User{}).Where("username = ? OR email = ?", req.Username, req.Email).Count(&count)
 
 	if count > 0 {
 		jsonError(w, http.StatusBadRequest, "The email address or username is already in use")
@@ -72,27 +65,20 @@ func Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	now := time.Now()
 	newUser := models.User{
-		ID: uuid.New().String(),
+		ID:        uuid.New().String(),
+		Username:  req.Username,
+		Email:     req.Email,
+		Password:  hashedPassword,
+		Role:      "USER",
+		Active:    true,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
-	_, err = database.DB.Exec(
-		`INSERT INTO "Users" ("id", "username", "email", "password", "role") VALUES (?, ?, ?, ?, 'USER')`,
-		newUser.ID, req.Username, req.Email, hashedPassword,
-	)
-	if err != nil {
+	if err := database.DB.Create(&newUser).Error; err != nil {
 		log.Printf("Register error (insert): %v", err)
-		jsonError(w, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-
-	err = database.DB.QueryRow(
-		`SELECT "id", "username", "email", "role", "active", "created_at", "updated_at"
-		 FROM "Users" WHERE "username" = ?`,
-		req.Username,
-	).Scan(&newUser.ID, &newUser.Username, &newUser.Email, &newUser.Role, &newUser.Active, &newUser.CreatedAt, &newUser.UpdatedAt)
-	if err != nil {
-		log.Printf("Register error (select after insert): %v", err)
 		jsonError(w, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
@@ -124,13 +110,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user models.User
-	var hashedPassword string
-	err := database.DB.QueryRow(
-		`SELECT "id", "username", "email", "role", "password", "active", "created_at", "updated_at"
-		 FROM "Users" WHERE "username" = ?`,
-		req.Username,
-	).Scan(&user.ID, &user.Username, &user.Email, &user.Role, &hashedPassword, &user.Active, &user.CreatedAt, &user.UpdatedAt)
-	if err != nil {
+	if err := database.DB.Where("username = ?", req.Username).First(&user).Error; err != nil {
 		jsonError(w, http.StatusBadRequest, "This user does not exist")
 		return
 	}
@@ -140,7 +120,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !utils.CheckPasswordHash(req.Password, hashedPassword) {
+	if !utils.CheckPasswordHash(req.Password, user.Password) {
 		jsonError(w, http.StatusForbidden, "The credentials are invalid")
 		return
 	}

@@ -3,42 +3,29 @@ package database
 import (
 	"database/sql"
 	"log"
-	"os"
-	"path/filepath"
+
+	"backend/models"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
-var DB *sql.DB
+var DB *gorm.DB
 
-func StartDatabase(db *sql.DB) {
+func StartDatabase(sqlDB *sql.DB) {
+	db, err := gorm.Open(sqlite.New(sqlite.Config{
+		Conn: sqlDB,
+	}), &gorm.Config{})
+
+	if err != nil {
+		log.Fatalf("Error connecting to database: %v", err)
+	}
+
 	DB = db
-	schemePath := filepath.Join("database", "scheme.sqlite")
-	scheme, err := os.ReadFile(schemePath)
 
-	if err != nil {
-		log.Fatalf("Error reading scheme file: %v", err)
+	if err := db.AutoMigrate(&models.User{}, &models.Product{}, &models.ProductUpdate{}); err != nil {
+		log.Fatalf("Error migrating database: %v", err)
 	}
 
-	_, err = DB.Exec(string(scheme))
-
-	if err != nil {
-		log.Fatalf("Error executing scheme: %v", err)
-	}
-
-	log.Println("Tables and indexes successfully created")
-}
-
-func Migrate(migrationFile string) {
-	scheme, err := os.ReadFile(migrationFile)
-
-	if err != nil {
-		log.Fatalf("Error reading migration file: %v", err)
-	}
-
-	_, err = DB.Exec(string(scheme))
-
-	if err != nil {
-		log.Fatalf("Error executing migration: %v", err)
-	}
-
-	log.Println("Migration successful")
+	log.Println("Database migrated successfully")
 }

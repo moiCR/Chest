@@ -2,6 +2,7 @@ package main
 
 import (
 	"backend/database"
+	"backend/r2"
 	"backend/routes"
 	"database/sql"
 	"fmt"
@@ -34,6 +35,8 @@ func main() {
 	defer db.Close()
 
 	database.StartDatabase(db)
+
+	r2.InitR2()
 
 	port := os.Getenv("PORT")
 	if port == "" {
