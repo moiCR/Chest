@@ -70,7 +70,7 @@ export function LoginModal({
 
     try {
       const apiUrl = (
-        process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:2005"
+        process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3312"
       )
         .replace(/^https:\/\/localhost(?=[:/]|$)/, "http://localhost")
         .replace(/\/$/, "");

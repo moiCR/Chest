@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS "Users" (
+    "id" TEXT PRIMARY KEY DEFAULT (randomuuid()),
+    "username" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "role" TEXT NOT NULL,
+    "password" TEXT NOT NULL,
+    "active" BOOLEAN NOT NULL DEFAULT FALSE,
+    "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOLEAN NOT NULL DEFAULT FALSE,
+    "deleted_at" TIMESTAMP
+);
