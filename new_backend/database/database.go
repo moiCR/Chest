@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 )
 
+var DB *sql.DB
+
 func StartDatabase(db *sql.DB) {
+	DB = db
 	schemePath := filepath.Join("database", "scheme.sqlite")
 	scheme, err := os.ReadFile(schemePath)
 
@@ -15,7 +18,7 @@ func StartDatabase(db *sql.DB) {
 		log.Fatalf("Error reading scheme file: %v", err)
 	}
 
-	_, err = db.Exec(string(scheme))
+	_, err = DB.Exec(string(scheme))
 
 	if err != nil {
 		log.Fatalf("Error executing scheme: %v", err)
@@ -24,15 +27,14 @@ func StartDatabase(db *sql.DB) {
 	log.Println("Tables and indexes successfully created")
 }
 
-
-func Migrate(db *sql.DB, migrationFile string) {
+func Migrate(migrationFile string) {
 	scheme, err := os.ReadFile(migrationFile)
 
 	if err != nil {
 		log.Fatalf("Error reading migration file: %v", err)
 	}
 
-	_, err = db.Exec(string(scheme))
+	_, err = DB.Exec(string(scheme))
 
 	if err != nil {
 		log.Fatalf("Error executing migration: %v", err)

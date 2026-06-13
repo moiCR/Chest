@@ -45,10 +45,27 @@ func main() {
 	mux := http.NewServeMux()
 	routes.RegisterRoutes(mux)
 
+	corsMux := corsMiddleware(mux)
+
 	log.Printf("Server is running on port %d\n", PORT)
 
-	err = http.ListenAndServe(fmt.Sprintf(":%d", PORT), mux)
+	err = http.ListenAndServe(fmt.Sprintf(":%d", PORT), corsMux)
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
