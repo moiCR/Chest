@@ -12,6 +12,7 @@ type Product struct {
 	AuthorID    string          `gorm:"column:author_id" json:"author_id"`
 	Author      User            `gorm:"foreignKey:AuthorID" json:"author"`
 	Updates     []ProductUpdate `gorm:"foreignKey:ProductID" json:"updates"`
+	Licenses    []License       `gorm:"foreignKey:ProductID" json:"licenses"`
 	FileKey     string          `gorm:"column:file_key" json:"file_key"`
 	FileName    string          `gorm:"column:file_name" json:"file_name"`
 	FileSize    int64           `gorm:"column:file_size" json:"file_size"`

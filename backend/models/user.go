@@ -13,7 +13,8 @@ type User struct {
 	UpdatedAt time.Time `gorm:"column:updated_at" json:"updated_at"`
 	Deleted   bool      `gorm:"column:deleted" json:"deleted"`
 	DeletedAt time.Time `gorm:"column:deleted_at" json:"deleted_at"`
-	Products  []Product `gorm:"foreignKey:AuthorID" json:"products"`
+	Products  []Product  `gorm:"foreignKey:AuthorID" json:"products"`
+	Licenses  []License  `gorm:"foreignKey:UserID" json:"licenses"`
 }
 
 func (User) TableName() string {

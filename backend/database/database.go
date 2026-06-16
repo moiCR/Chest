@@ -23,7 +23,13 @@ func StartDatabase(sqlDB *sql.DB) {
 
 	DB = db
 
-	if err := db.AutoMigrate(&models.User{}, &models.Product{}, &models.ProductUpdate{}); err != nil {
+	if err := db.AutoMigrate(
+		&models.User{},
+		&models.Product{},
+		&models.ProductUpdate{},
+		&models.License{},
+		&models.LicenseLog{},
+	); err != nil {
 		log.Fatalf("Error migrating database: %v", err)
 	}
 
