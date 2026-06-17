@@ -110,6 +110,7 @@ func UploadProductUpdate(w http.ResponseWriter, r *http.Request) {
 	title := r.FormValue("title")
 	description := r.FormValue("description")
 	updateType := r.FormValue("type")
+	branch := r.FormValue("branch")
 
 	if version == "" || title == "" {
 		jsonError(w, http.StatusBadRequest, "Version and title are required")
@@ -118,6 +119,15 @@ func UploadProductUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if updateType == "" {
 		updateType = "minor"
+	}
+
+	if branch == "" {
+		branch = "release"
+	}
+
+	if branch != "release" && branch != "beta" {
+		jsonError(w, http.StatusBadRequest, "Branch must be 'release' or 'beta'")
+		return
 	}
 
 	updateID := uuid.New().String()
@@ -141,6 +151,7 @@ func UploadProductUpdate(w http.ResponseWriter, r *http.Request) {
 		Title:       title,
 		Description: description,
 		Type:        updateType,
+		Branch:      branch,
 		FileKey:     fileKey,
 		FileName:    header.Filename,
 		FileSize:    header.Size,
@@ -154,12 +165,14 @@ func UploadProductUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	database.DB.Model(&product).Updates(map[string]interface{}{
-		"version":    version,
-		"file_key":   fileKey,
-		"file_size":  header.Size,
-		"updated_at": now,
-	})
+	if branch == "release" {
+		database.DB.Model(&product).Updates(map[string]interface{}{
+			"version":    version,
+			"file_key":   fileKey,
+			"file_size":  header.Size,
+			"updated_at": now,
+		})
+	}
 
 	jsonResponse(w, http.StatusCreated, map[string]interface{}{
 		"message": "Update uploaded successfully",
@@ -176,16 +189,38 @@ func DownloadProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if product.FileKey == "" {
+	branch := r.URL.Query().Get("branch")
+	if branch == "" {
+		branch = "release"
+	}
+
+	var fileKey string
+	var fileName string
+
+	if branch == "release" && product.FileKey != "" {
+		fileKey = product.FileKey
+		fileName = product.FileName
+	} else {
+		var update models.ProductUpdate
+		if err := database.DB.Where("product_id = ? AND branch = ?", productID, branch).
+			Order("created_at DESC").First(&update).Error; err != nil {
+			jsonError(w, http.StatusNotFound, "No update found for this branch")
+			return
+		}
+		fileKey = update.FileKey
+		fileName = update.FileName
+	}
+
+	if fileKey == "" {
 		jsonError(w, http.StatusNotFound, "File not found")
 		return
 	}
 
-	filename := product.FileName
-	if filename == "" {
-		filename = fmt.Sprintf("%s-v%s.jar", product.Name, product.Version)
+	if fileName == "" {
+		fileName = fmt.Sprintf("%s-v%s.jar", product.Name, product.Version)
 	}
-	url, err := r2.GetSignedURL(r.Context(), product.FileKey, filename)
+
+	url, err := r2.GetSignedURL(r.Context(), fileKey, fileName)
 	if err != nil {
 		log.Printf("R2 presign error: %v", err)
 		jsonError(w, http.StatusInternalServerError, "Error generating download URL")
@@ -229,11 +264,15 @@ func DownloadProductUpdate(w http.ResponseWriter, r *http.Request) {
 
 func GetProductUpdates(w http.ResponseWriter, r *http.Request) {
 	productID := r.PathValue("id")
+	branch := r.URL.Query().Get("branch")
+
+	query := database.DB.Where("product_id = ?", productID)
+	if branch != "" {
+		query = query.Where("branch = ?", branch)
+	}
 
 	var updates []models.ProductUpdate
-	if err := database.DB.Where("product_id = ?", productID).
-		Order("created_at DESC").
-		Find(&updates).Error; err != nil {
+	if err := query.Order("created_at DESC").Find(&updates).Error; err != nil {
 		jsonError(w, http.StatusInternalServerError, "Error fetching updates")
 		return
 	}
@@ -276,5 +315,115 @@ func GetProduct(w http.ResponseWriter, r *http.Request) {
 
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"product": product,
+	})
+}
+
+func EditProductUpdate(w http.ResponseWriter, r *http.Request) {
+	productID := r.PathValue("id")
+	updateID := r.PathValue("updateId")
+
+	var update models.ProductUpdate
+	if err := database.DB.First(&update, "id = ? AND product_id = ?", updateID, productID).Error; err != nil {
+		jsonError(w, http.StatusNotFound, "Update not found")
+		return
+	}
+
+	if err := r.ParseMultipartForm(100 << 20); err != nil {
+		jsonError(w, http.StatusBadRequest, "Invalid form data")
+		return
+	}
+
+	if title := r.FormValue("title"); title != "" {
+		update.Title = title
+	}
+	if description := r.FormValue("description"); description != "" {
+		update.Description = description
+	}
+	if version := r.FormValue("version"); version != "" {
+		update.Version = version
+	}
+	if updateType := r.FormValue("type"); updateType != "" {
+		update.Type = updateType
+	}
+	if branch := r.FormValue("branch"); branch != "" {
+		if branch != "release" && branch != "beta" {
+			jsonError(w, http.StatusBadRequest, "Branch must be 'release' or 'beta'")
+			return
+		}
+		update.Branch = branch
+	}
+
+	file, header, err := r.FormFile("file")
+	if err == nil {
+		defer file.Close()
+
+		folder := "plugins"
+		var product models.Product
+		if err := database.DB.First(&product, "id = ?", productID).Error; err == nil && product.Category == "mod" {
+			folder = "mods"
+		}
+		fileKey := folder + "/" + productID + "/updates/" + updateID + ".jar"
+
+		if err := r2.UploadFile(r.Context(), fileKey, file); err != nil {
+			log.Printf("R2 upload error: %v", err)
+			jsonError(w, http.StatusInternalServerError, "Error uploading file")
+			return
+		}
+
+		if update.FileKey != "" {
+			r2.DeleteFile(r.Context(), update.FileKey)
+		}
+
+		update.FileKey = fileKey
+		update.FileName = header.Filename
+		update.FileSize = header.Size
+	}
+
+	if err := database.DB.Save(&update).Error; err != nil {
+		jsonError(w, http.StatusInternalServerError, "Error updating update")
+		return
+	}
+
+	if update.Branch == "release" {
+		updates := map[string]interface{}{
+			"version":    update.Version,
+			"updated_at": time.Now(),
+		}
+		if update.FileKey != "" {
+			updates["file_key"] = update.FileKey
+			updates["file_size"] = update.FileSize
+		}
+		database.DB.Model(&models.Product{}).Where("id = ?", productID).Updates(updates)
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"message": "Update updated successfully",
+		"update":  update,
+	})
+}
+
+func DeleteProductUpdate(w http.ResponseWriter, r *http.Request) {
+	productID := r.PathValue("id")
+	updateID := r.PathValue("updateId")
+
+	var update models.ProductUpdate
+	if err := database.DB.First(&update, "id = ? AND product_id = ?", updateID, productID).Error; err != nil {
+		jsonError(w, http.StatusNotFound, "Update not found")
+		return
+	}
+
+	if update.FileKey != "" {
+		if err := r2.DeleteFile(r.Context(), update.FileKey); err != nil {
+			log.Printf("R2 delete error: %v", err)
+		}
+	}
+
+	if err := database.DB.Delete(&update).Error; err != nil {
+		jsonError(w, http.StatusInternalServerError, "Error deleting update")
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"message": "Update deleted successfully",
 	})
 }

@@ -33,20 +33,20 @@ function parseInline(text: string): React.ReactNode[] {
     const italicMatch = remaining.match(/\*(.+?)\*/);
     const codeMatch = remaining.match(/`(.+?)`/);
 
-    let firstMatch: { index: number; length: number; node: React.ReactNode } | null = null;
+    type Match = { index: number; length: number; node: React.ReactNode };
+    const candidates: Match[] = [];
 
     if (boldMatch && boldMatch.index !== undefined) {
-      const candidate = { index: boldMatch.index, length: boldMatch[0].length, node: <strong key={key++}>{boldMatch[1]}</strong> };
-      if (!firstMatch || candidate.index < firstMatch.index) firstMatch = candidate;
+      candidates.push({ index: boldMatch.index, length: boldMatch[0].length, node: <strong key={key++}>{boldMatch[1]}</strong> });
     }
     if (italicMatch && italicMatch.index !== undefined && italicMatch[1] !== italicMatch[0].slice(1, -1).replace(/\*\*/g, "")) {
-      const candidate = { index: italicMatch.index, length: italicMatch[0].length, node: <em key={key++}>{italicMatch[1]}</em> };
-      if (!firstMatch || candidate.index < firstMatch.index) firstMatch = candidate;
+      candidates.push({ index: italicMatch.index, length: italicMatch[0].length, node: <em key={key++}>{italicMatch[1]}</em> });
     }
     if (codeMatch && codeMatch.index !== undefined) {
-      const candidate = { index: codeMatch.index, length: codeMatch[0].length, node: <code key={key++}>{codeMatch[1]}</code> };
-      if (!firstMatch || candidate.index < firstMatch.index) firstMatch = candidate;
+      candidates.push({ index: codeMatch.index, length: codeMatch[0].length, node: <code key={key++}>{codeMatch[1]}</code> });
     }
+
+    const firstMatch = candidates.length > 0 ? candidates.reduce((a, b) => a.index < b.index ? a : b) : null;
 
     if (firstMatch) {
       if (firstMatch.index > 0) {

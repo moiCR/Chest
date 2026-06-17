@@ -107,8 +107,10 @@ export default function ProductsPage() {
     const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
 
     if (diffInSeconds < 60) return "just now";
-    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes`;
-    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours`;
+    if (diffInSeconds < 3600)
+      return `${Math.floor(diffInSeconds / 60)} minutes`;
+    if (diffInSeconds < 86400)
+      return `${Math.floor(diffInSeconds / 3600)} hours`;
     return `${Math.floor(diffInSeconds / 86400)} days`;
   };
 
@@ -198,44 +200,42 @@ export default function ProductsPage() {
         ) : (
           products.map((product) => (
             <Link href={`/dashboard/products/${product.id}`} key={product.id}>
-              <article
-                className="min-h-36 cursor-pointer rounded-xl border border-white/15 bg-black p-5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition hover:border-white/25"
-              >
-              <div className="flex h-full min-h-26 flex-col justify-between pt-1">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Box
-                      className="shrink-0 text-white/75"
-                      size={22}
-                      strokeWidth={1.8}
-                    />
-                    <h3 className="truncate text-base font-semibold text-white/85">
-                      {product.name}
-                    </h3>
+              <article className="min-h-36 cursor-pointer rounded-xl border border-white/15 bg-black p-5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition hover:border-white/25">
+                <div className="flex h-full min-h-26 flex-col justify-between pt-1">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Box
+                        className="shrink-0 text-white/75"
+                        size={22}
+                        strokeWidth={1.8}
+                      />
+                      <h3 className="truncate text-base font-semibold text-white/85">
+                        {product.name}
+                      </h3>
+                    </div>
+
+                    <div className="-mt-1 flex shrink-0 items-center gap-2">
+                      <span className="rounded-full border border-white/10 bg-white/6 px-2.5 py-1 text-xs font-medium text-white/55">
+                        {product.category}
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        className="flex h-7 w-7 items-center justify-center text-white/45"
+                      >
+                        <MoreHorizontal size={20} strokeWidth={2.2} />
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="-mt-1 flex shrink-0 items-center gap-2">
-                    <span className="rounded-full border border-white/10 bg-white/6 px-2.5 py-1 text-xs font-medium text-white/55">
-                      {product.category}
+                  <div className="flex items-center justify-between gap-4 text-sm">
+                    <span className="text-white/42">
+                      Created {timeAgo(product.created_at)} ago
                     </span>
-                    <span
-                      aria-hidden="true"
-                      className="flex h-7 w-7 items-center justify-center text-white/45"
-                    >
-                      <MoreHorizontal size={20} strokeWidth={2.2} />
+                    <span className="whitespace-nowrap font-medium text-white/75">
+                      {product.downloads} Downloads
                     </span>
                   </div>
                 </div>
-
-                <div className="flex items-center justify-between gap-4 text-sm">
-                  <span className="text-white/42">
-                    Created {timeAgo(product.created_at)} ago
-                  </span>
-                  <span className="whitespace-nowrap font-medium text-white/75">
-                    {product.downloads} Downloads
-                  </span>
-                </div>
-              </div>
               </article>
             </Link>
           ))

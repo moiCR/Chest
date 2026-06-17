@@ -34,6 +34,7 @@ type ProductUpdate struct {
 	Title       string    `gorm:"column:title" json:"title"`
 	Description string    `gorm:"column:description" json:"description"`
 	Type        string    `gorm:"column:type" json:"type"`
+	Branch      string    `gorm:"column:branch;default:'release'" json:"branch"`
 	FileKey     string    `gorm:"column:file_key" json:"file_key"`
 	FileName    string    `gorm:"column:file_name" json:"file_name"`
 	FileSize    int64     `gorm:"column:file_size" json:"file_size"`

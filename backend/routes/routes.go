@@ -16,6 +16,8 @@ func RegisterRoutes(mux *http.ServeMux) {
 	authMux.HandleFunc("POST /products", handlers.UploadProduct)
 	authMux.HandleFunc("GET /products/{id}/updates", handlers.GetProductUpdates)
 	authMux.HandleFunc("POST /products/{id}/updates", handlers.UploadProductUpdate)
+	authMux.HandleFunc("PUT /products/{id}/updates/{updateId}", handlers.EditProductUpdate)
+	authMux.HandleFunc("DELETE /products/{id}/updates/{updateId}", handlers.DeleteProductUpdate)
 	authMux.HandleFunc("GET /products/{id}/download", handlers.DownloadProduct)
 	authMux.HandleFunc("GET /products/updates/{updateId}/download", handlers.DownloadProductUpdate)
 
